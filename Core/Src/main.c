@@ -87,17 +87,25 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	  tmp <<= 8;
 	  tmp += RxData[3];
 
+	  uint16_t pwmReceived = degreesToPWM(tmp, RxHeader.StdId);
+
+	  // Return if converted PWM is invalid
+	  if(pwmReceived == 0)
+	  {
+		  return;
+	  }
+
 	  if(RxHeader.StdId == 0x00F)
 	  {
 //		  TIM1->CCR1 = tmp;
 //		  TIM1->CCR1 = degreesToPWM(tmp, RxHeader.StdId);
-		  newServoPositions[0] = degreesToPWM(tmp, RxHeader.StdId);
+		  newServoPositions[0] = pwmReceived;
 	  }
 	  else if(RxHeader.StdId == 0x010)
 	  {
 //		  TIM1->CCR2 = tmp;
 //		  TIM1->CCR2 = degreesToPWM(tmp, RxHeader.StdId);
-		  newServoPositions[1] = degreesToPWM(tmp, RxHeader.StdId);
+		  newServoPositions[1] = pwmReceived;
 	  }
   }
 }

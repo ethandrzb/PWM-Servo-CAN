@@ -87,13 +87,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	  tmp <<= 8;
 	  tmp += RxData[3];
 
-	  if(RxHeader.StdId == 0x001)
+	  if(RxHeader.StdId == 0x00F)
 	  {
 //		  TIM1->CCR1 = tmp;
 //		  TIM1->CCR1 = degreesToPWM(tmp, RxHeader.StdId);
 		  newServoPositions[0] = degreesToPWM(tmp, RxHeader.StdId);
 	  }
-	  else if(RxHeader.StdId == 0x002)
+	  else if(RxHeader.StdId == 0x010)
 	  {
 //		  TIM1->CCR2 = tmp;
 //		  TIM1->CCR2 = degreesToPWM(tmp, RxHeader.StdId);
@@ -130,11 +130,11 @@ uint32_t degreesToPWM(int16_t degrees, uint32_t ID)
 {
 	uint32_t retVal = 0;
 	int16_t minDegrees[] = {-75, 0};
-	int16_t maxDegrees[] = {75, 121};
+	int16_t maxDegrees[] = {75, 120};
 
 	// Validate range for this joint
 	// Offset to compensate for ID's being 1-indexed and arrays being 0-indexed
-	if(degrees < minDegrees[ID - 1] || degrees > maxDegrees[ID - 1])
+	if(degrees < minDegrees[ID - 15] || degrees > maxDegrees[ID - 15])
 	{
 		// Can use this as error value b/c pulse will never be this thin
 		return 0;
@@ -143,12 +143,12 @@ uint32_t degreesToPWM(int16_t degrees, uint32_t ID)
 	// newValue = (-1 if flipped, 1 if not) * oldValue * (newRange / oldRange) + newRangeOffset
 	switch(ID)
 	{
-		case 0x001:
+		case 0x00F:
 //			retVal =  (((75 - degrees) * 1556) / 150) + 2088;
 			retVal =  (((75 - degrees) * 2350) / 150) + 2000;
 			break;
-		case 0x002:
-			retVal = ((degrees * 1704) / 121) + 1792;
+		case 0x010:
+			retVal = ((degrees * 1704) / 120) + 1675;
 			break;
 	}
 
@@ -325,14 +325,15 @@ static void MX_CAN1_Init(void)
   canFilterConfig.FilterActivation = CAN_FILTER_ENABLE;
   canFilterConfig.FilterBank = 0;
   canFilterConfig.FilterFIFOAssignment = CAN_FilterFIFO0;
-  canFilterConfig.FilterIdHigh = 0x001 << 5;
+  canFilterConfig.FilterIdHigh = 0x00F << 5;
   canFilterConfig.FilterIdLow = 0;
   // All bits except for lower bits of ID must match for message to pass filter
   // I know the low bits are assigned to the ...High registers and the high bits to the ...Low registers.
   // It didn't work the other way
-  canFilterConfig.FilterMaskIdHigh = 0xFFFC << 5;
-  canFilterConfig.FilterMaskIdLow = 0xFFFF;
-  canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+  canFilterConfig.FilterMaskIdHigh = 0x010 << 5;
+  canFilterConfig.FilterMaskIdLow = 0x0000;
+//  canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+    canFilterConfig.FilterMode = CAN_FILTERMODE_IDLIST;
   canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
   canFilterConfig.SlaveStartFilterBank = 20;
 

@@ -67,7 +67,7 @@ uint32_t degreesToPWM(int16_t degrees, uint32_t ID);
 CAN_RxHeaderTypeDef RxHeader;
 uint8_t RxData[8];
 
-uint16_t newServoPositions[2];
+uint16_t newServoPositions[3];
 
 // Sample CAN command (degrees): cansend can0 001#0001004B00000000
 // Sample CAN command (raw PWM value): cansend can0 001#0001089800000000
@@ -95,17 +95,17 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 		  return;
 	  }
 
-	  if(RxHeader.StdId == 0x00F)
+	  if(RxHeader.StdId == 0x012)
 	  {
-//		  TIM1->CCR1 = tmp;
-//		  TIM1->CCR1 = degreesToPWM(tmp, RxHeader.StdId);
 		  newServoPositions[0] = pwmReceived;
 	  }
-	  else if(RxHeader.StdId == 0x010)
+	  else if(RxHeader.StdId == 0x013)
 	  {
-//		  TIM1->CCR2 = tmp;
-//		  TIM1->CCR2 = degreesToPWM(tmp, RxHeader.StdId);
 		  newServoPositions[1] = pwmReceived;
+	  }
+	  else if(RxHeader.StdId == 0x014)
+	  {
+		  newServoPositions[2] = pwmReceived;
 	  }
   }
 }
@@ -131,32 +131,44 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 		{
 			TIM1->CCR2--;
 		}
+
+		if(TIM1->CCR3 < newServoPositions[2])
+		{
+			TIM1->CCR3++;
+		}
+		else if(TIM1->CCR3 > newServoPositions[2])
+		{
+			TIM1->CCR3--;
+		}
 	}
 }
 
 uint32_t degreesToPWM(int16_t degrees, uint32_t ID)
 {
 	uint32_t retVal = 0;
-	int16_t minDegrees[] = {-75, 0};
-	int16_t maxDegrees[] = {75, 120};
+	int16_t minDegrees[] = {0, 0, 0};
+	int16_t maxDegrees[] = {270, 270, 100};
 
 	// Validate range for this joint
 	// Offset to compensate for ID's being 1-indexed and arrays being 0-indexed
-	if(degrees < minDegrees[ID - 15] || degrees > maxDegrees[ID - 15])
+	if(degrees < minDegrees[ID - 18] || degrees > maxDegrees[ID - 18])
 	{
 		// Can use this as error value b/c pulse will never be this thin
 		return 0;
 	}
 
 	// newValue = (-1 if flipped, 1 if not) * oldValue * (newRange / oldRange) + newRangeOffset
+	// Put range mapping in this switch statement
 	switch(ID)
 	{
-		case 0x00F:
-//			retVal =  (((75 - degrees) * 1556) / 150) + 2088;
-			retVal =  (((75 - degrees) * 2350) / 150) + 2000;
+		case 0x012:
+			retVal = ((degrees * 4000) / 270) + 1000;
 			break;
-		case 0x010:
-			retVal = ((degrees * 1704) / 120) + 1675;
+		case 0x013:
+			retVal = ((degrees * 4000) / 270) + 1000;
+			break;
+		case 0x014:
+			retVal = ((degrees * 4000) / 100) + 1000;
 			break;
 	}
 
@@ -200,15 +212,18 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   // Center neck and head
-  TIM1->CCR1 = 3175;
+  TIM1->CCR1 = 3000;
   TIM1->CCR2 = 3000;
+  TIM1->CCR3 = 3000;
 
   // Initialize target values for P-control
   newServoPositions[0] = TIM1->CCR1;
   newServoPositions[1] = TIM1->CCR2;
+  newServoPositions[2] = TIM1->CCR3;
 
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 
   HAL_TIM_Base_Start_IT(&htim2);
 
@@ -221,17 +236,15 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  for(int i = 2200; i < 5000; i += 10)
+//	  for(int i = 1000; i < 5000; i += 10)
 //	  {
-//		  TIM1->CCR1 = i;
-//		  TIM1->CCR2 = i - 1500;
+//		  TIM1->CCR2 = i;
 //		  HAL_Delay(10);
 //	  }
 //
-//	  for(int i = 5000; i > 2200; i -= 10)
+//	  for(int i = 5000; i > 1000; i -= 10)
 //	  {
-//		  TIM1->CCR1 = i;
-//		  TIM1->CCR2 = i - 1500;
+//		  TIM1->CCR2 = i;
 //		  HAL_Delay(10);
 //	  }
 
@@ -333,17 +346,29 @@ static void MX_CAN1_Init(void)
   canFilterConfig.FilterActivation = CAN_FILTER_ENABLE;
   canFilterConfig.FilterBank = 0;
   canFilterConfig.FilterFIFOAssignment = CAN_FilterFIFO0;
-  canFilterConfig.FilterIdHigh = 0x00F << 5;
+  canFilterConfig.FilterIdHigh = 0x012 << 5;
   canFilterConfig.FilterIdLow = 0;
   // All bits except for lower bits of ID must match for message to pass filter
   // I know the low bits are assigned to the ...High registers and the high bits to the ...Low registers.
   // It didn't work the other way
-  canFilterConfig.FilterMaskIdHigh = 0x010 << 5;
+  canFilterConfig.FilterMaskIdHigh = 0x013 << 5;
   canFilterConfig.FilterMaskIdLow = 0x0000;
 //  canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
     canFilterConfig.FilterMode = CAN_FILTERMODE_IDLIST;
   canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
-  canFilterConfig.SlaveStartFilterBank = 20;
+
+  HAL_CAN_ConfigFilter(&hcan1, &canFilterConfig);
+
+
+  canFilterConfig.FilterActivation = CAN_FILTER_ENABLE;
+  canFilterConfig.FilterBank = 1;
+  canFilterConfig.FilterFIFOAssignment = CAN_FilterFIFO0;
+  canFilterConfig.FilterIdHigh = 0x014 << 5;
+  canFilterConfig.FilterIdLow = 0;
+  canFilterConfig.FilterMaskIdHigh = 0x0000 << 5;
+  canFilterConfig.FilterMaskIdLow = 0x0000;
+  canFilterConfig.FilterMode = CAN_FILTERMODE_IDLIST;
+  canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
 
   HAL_CAN_ConfigFilter(&hcan1, &canFilterConfig);
 
@@ -409,6 +434,10 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
   {
     Error_Handler();
   }

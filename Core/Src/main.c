@@ -43,6 +43,7 @@
 CAN_HandleTypeDef hcan1;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart2;
 
@@ -56,6 +57,7 @@ static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_CAN1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 uint32_t degreesToPWM(int16_t degrees, uint32_t ID);
 /* USER CODE END PFP */
@@ -65,7 +67,10 @@ uint32_t degreesToPWM(int16_t degrees, uint32_t ID);
 CAN_RxHeaderTypeDef RxHeader;
 uint8_t RxData[8];
 
-// Sample CAN command: cansend can0 001#0001089800000000
+uint16_t newServoPositions[2];
+
+// Sample CAN command (degrees): cansend can0 001#0001004B00000000
+// Sample CAN command (raw PWM value): cansend can0 001#0001089800000000
 // Yes. You need both the leading and trailing zeroes.
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
@@ -85,14 +90,40 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	  if(RxHeader.StdId == 0x001)
 	  {
 //		  TIM1->CCR1 = tmp;
-		  TIM1->CCR1 = degreesToPWM(tmp, RxHeader.StdId);
+//		  TIM1->CCR1 = degreesToPWM(tmp, RxHeader.StdId);
+		  newServoPositions[0] = degreesToPWM(tmp, RxHeader.StdId);
 	  }
 	  else if(RxHeader.StdId == 0x002)
 	  {
 //		  TIM1->CCR2 = tmp;
-		  TIM1->CCR2 = degreesToPWM(tmp, RxHeader.StdId);
+//		  TIM1->CCR2 = degreesToPWM(tmp, RxHeader.StdId);
+		  newServoPositions[1] = degreesToPWM(tmp, RxHeader.StdId);
 	  }
   }
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
+{
+	if(htim == &htim2)
+	{
+		if(TIM1->CCR1 < newServoPositions[0])
+		{
+			TIM1->CCR1++;
+		}
+		else if(TIM1->CCR1 > newServoPositions[0])
+		{
+			TIM1->CCR1--;
+		}
+
+		if(TIM1->CCR2 < newServoPositions[1])
+		{
+			TIM1->CCR2++;
+		}
+		else if(TIM1->CCR2 > newServoPositions[1])
+		{
+			TIM1->CCR2--;
+		}
+	}
 }
 
 uint32_t degreesToPWM(int16_t degrees, uint32_t ID)
@@ -113,10 +144,12 @@ uint32_t degreesToPWM(int16_t degrees, uint32_t ID)
 	switch(ID)
 	{
 		case 0x001:
-			retVal =  (((75 - degrees) * 1556) / 150) + 2088;
+//			retVal =  (((75 - degrees) * 1556) / 150) + 2088;
+			retVal =  (((75 - degrees) * 2350) / 150) + 2000;
 			break;
 		case 0x002:
 			retVal = ((degrees * 1704) / 121) + 1792;
+			break;
 	}
 
 	return retVal;
@@ -155,13 +188,21 @@ int main(void)
   MX_TIM1_Init();
   MX_USART2_UART_Init();
   MX_CAN1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
   // Center neck and head
-  TIM1->CCR1 = 3136;
+  TIM1->CCR1 = 3175;
   TIM1->CCR2 = 3000;
+
+  // Initialize target values for P-control
+  newServoPositions[0] = TIM1->CCR1;
+  newServoPositions[1] = TIM1->CCR2;
+
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+
+  HAL_TIM_Base_Start_IT(&htim2);
 
   HAL_CAN_Start(&hcan1);
   HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
@@ -377,6 +418,51 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 2 */
   HAL_TIM_MspPostInit(&htim1);
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 90-1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 1500-1;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
